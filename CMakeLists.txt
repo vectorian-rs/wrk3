@@ -20,6 +20,7 @@ FetchContent_Declare(aws_lc
     GIT_REPOSITORY https://github.com/aws/aws-lc.git
     GIT_TAG        main
     GIT_SHALLOW    TRUE
+    GIT_PROGRESS   TRUE
 )
 message(STATUS "Fetching AWS-LC...")
 FetchContent_MakeAvailable(aws_lc)
@@ -32,6 +33,7 @@ FetchContent_Declare(s2n_tls
     GIT_REPOSITORY https://github.com/aws/s2n-tls.git
     GIT_TAG        main
     GIT_SHALLOW    TRUE
+    GIT_PROGRESS   TRUE
 )
 message(STATUS "Fetching s2n-tls...")
 FetchContent_MakeAvailable(s2n_tls)
