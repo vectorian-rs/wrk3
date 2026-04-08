@@ -799,7 +799,7 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
             case 'v':
                 printf("wrk3 %s [%s]\n", VERSION, aeGetApiName());
                 printf("  Based on wrk by Will Glozer and wrk2 by Gil Tene\n");
-                break;
+                exit(0);
             case 'h':
             case '?':
             case ':':
