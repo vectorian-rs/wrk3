@@ -1,0 +1,17 @@
+[tasks.build]
+description = "Build wrk3"
+run = "cmake -G Ninja -B build && ninja -C build"
+
+[tasks.clean]
+description = "Remove build directory"
+run = "rm -rf build"
+
+[tasks.rebuild]
+description = "Clean and build from scratch"
+depends = ["clean"]
+run = "cmake -G Ninja -B build && ninja -C build"
+
+[tasks.test]
+description = "Build and run smoke test"
+depends = ["build"]
+run = "./build/wrk --version"

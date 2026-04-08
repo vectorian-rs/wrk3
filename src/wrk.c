@@ -7,7 +7,7 @@
 #include "stats.h"
 
 // Max recordable latency of 1 day
-#define MAX_LATENCY 24L * 60 * 60 * 1000000
+#define MAX_LATENCY (24L * 60 * 60 * 1000000)
 
 static struct config {
     uint64_t threads;
@@ -152,7 +152,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    printf("Initialised %d threads in %d ms.\n",
+    printf("Initialised %"PRIu64" threads in %"PRIu64" ms.\n",
                             cfg.threads, (time_us() - thread_init) / 1000);
     uint64_t stop_at     = time_us() + (cfg.duration * 1000000);
     for (uint64_t i = 0; i < cfg.threads; i++) {
@@ -225,8 +225,6 @@ int main(int argc, char **argv) {
     print_stats_header();
     print_stats("Latency", latency_stats, format_time_us);
     print_stats("Req/Sec", statistics.requests, format_metric);
-//    if (cfg.latency) print_stats_latency(latency_stats);
-
     if (cfg.latency) {
         print_hdr_latency(latency_histogram,
                 "Recorded Latency");
@@ -245,12 +243,12 @@ int main(int argc, char **argv) {
     printf("  %"PRIu64" requests in %s, %sB read\n",
             complete, runtime_msg, format_binary(bytes));
     if (errors.connect || errors.read || errors.write || errors.timeout) {
-        printf("  Socket errors: connect %d, read %d, write %d, timeout %d\n",
+        printf("  Socket errors: connect %"PRIu32", read %"PRIu32", write %"PRIu32", timeout %"PRIu32"\n",
                errors.connect, errors.read, errors.write, errors.timeout);
     }
 
     if (errors.status) {
-        printf("  Non-2xx or 3xx responses: %d\n", errors.status);
+        printf("  Non-2xx or 3xx responses: %"PRIu32"\n", errors.status);
     }
 
     printf("Requests/sec: %9.2Lf\n", req_per_s);
@@ -557,25 +555,22 @@ static int response_complete(http_parser *parser) {
     int64_t expected_latency_timing = now - expected_latency_start;
 
     if (expected_latency_timing < 0) {
-        printf("\n\n ---------- \n\n");
-        printf("We are about to crash and die (recoridng a negative #)");
-        printf("This wil never ever ever happen...");
-        printf("But when it does. The following information will help in debugging");
-        printf("response_complete:\n");
-        printf("  expected_latency_timing = %lld\n", expected_latency_timing);
-        printf("  now = %lld\n", now);
-        printf("  expected_latency_start = %lld\n", expected_latency_start);
-        printf("  c->thread_start = %lld\n", c->thread_start);
-        printf("  c->complete = %lld\n", c->complete);
-        printf("  throughput = %g\n", c->throughput);
-        printf("  latest_should_send_time = %lld\n", c->latest_should_send_time);
-        printf("  latest_expected_start = %lld\n", c->latest_expected_start);
-        printf("  latest_connect = %lld\n", c->latest_connect);
-        printf("  latest_write = %lld\n", c->latest_write);
+        fprintf(stderr, "\n\n ---------- \n\n");
+        fprintf(stderr, "Negative latency detected. Debug info:\n");
+        fprintf(stderr, "  expected_latency_timing = %"PRId64"\n", expected_latency_timing);
+        fprintf(stderr, "  now = %"PRIu64"\n", now);
+        fprintf(stderr, "  expected_latency_start = %"PRIu64"\n", expected_latency_start);
+        fprintf(stderr, "  c->thread_start = %"PRIu64"\n", c->thread_start);
+        fprintf(stderr, "  c->complete = %"PRIu64"\n", c->complete);
+        fprintf(stderr, "  throughput = %g\n", c->throughput);
+        fprintf(stderr, "  latest_should_send_time = %"PRIu64"\n", c->latest_should_send_time);
+        fprintf(stderr, "  latest_expected_start = %"PRIu64"\n", c->latest_expected_start);
+        fprintf(stderr, "  latest_connect = %"PRIu64"\n", c->latest_connect);
+        fprintf(stderr, "  latest_write = %"PRIu64"\n", c->latest_write);
 
         expected_latency_start = c->thread_start +
-                ((c->complete ) / c->throughput);
-        printf("  next expected_latency_start = %lld\n", expected_latency_start);
+                ((c->complete) / c->throughput);
+        fprintf(stderr, "  next expected_latency_start = %"PRIu64"\n", expected_latency_start);
     }
 
     c->latest_should_send_time = 0;
@@ -613,6 +608,7 @@ static void socket_connected(aeEventLoop *loop, int fd, void *data, int mask) {
         case OK:    break;
         case ERROR: goto error;
         case RETRY: return;
+        default:    goto error;
     }
 
     http_parser_init(&c->parser, HTTP_RESPONSE);
@@ -670,6 +666,7 @@ static void socket_writeable(aeEventLoop *loop, int fd, void *data, int mask) {
         case OK:    break;
         case ERROR: goto error;
         case RETRY: return;
+        default:    goto error;
     }
 
     c->written += n;
@@ -693,10 +690,11 @@ static void socket_readable(aeEventLoop *loop, int fd, void *data, int mask) {
 
     do {
         switch (read_status = sock.read(c, &n)) {
-            case OK:    break;
-            case ERROR: goto error;
-            case RETRY: return;
+            case OK:       break;
+            case ERROR:    goto error;
+            case RETRY:    return;
             case READ_EOF: break;
+            default:       goto error;
         }
 
         if (http_parser_execute(&c->parser, &parser_settings, c->buf, n) != n) goto error;
@@ -724,7 +722,7 @@ static char *copy_url_part(char *url, struct http_parser_url *parts, enum http_p
     if (parts->field_set & (1 << field)) {
         uint16_t off = parts->field_data[field].off;
         uint16_t len = parts->field_data[field].len;
-        part = zcalloc(len + 1 * sizeof(char));
+        part = zcalloc((len + 1) * sizeof(char));
         memcpy(part, &url[off], len);
     }
 
@@ -749,7 +747,8 @@ static struct option longopts[] = {
 };
 
 static int parse_args(struct config *cfg, char **url, struct http_parser_url *parts, char **headers, int argc, char **argv) {
-    signed char c, **header = headers;
+    int c;
+    char **header = headers;
 
     memset(cfg, 0, sizeof(struct config));
     cfg->threads     = 2;
@@ -876,14 +875,3 @@ static void print_hdr_latency(struct hdr_histogram* histogram, const char* descr
     hdr_percentiles_print(histogram, stdout, 5, 1000.0, CLASSIC);
 }
 
-static void print_stats_latency(stats *stats) {
-    long double percentiles[] = { 50.0, 75.0, 90.0, 99.0, 99.9, 99.99, 99.999, 100.0 };
-    printf("  Latency Distribution\n");
-    for (size_t i = 0; i < sizeof(percentiles) / sizeof(long double); i++) {
-        long double p = percentiles[i];
-        uint64_t n = stats_percentile(stats, p);
-        printf("%7.3Lf%%", p);
-        print_units(n, format_time_us, 10);
-        printf("\n");
-    }
-}

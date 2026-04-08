@@ -21,8 +21,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Init submodules
+        run: git submodule update --init --depth 1 deps/aws-lc deps/s2n-tls deps/luajit
+
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+        run: |
+          sudo apt-get update
+          sudo apt-get remove -y libssl-dev || true
+          sudo apt-get install -y cmake ninja-build
 
       - name: Build
         run: cmake -G Ninja -B build && ninja -C build

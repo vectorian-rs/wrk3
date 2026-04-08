@@ -1,61 +1,53 @@
 cmake_minimum_required(VERSION 3.14)
+
+if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    execute_process(COMMAND sw_vers -productVersion
+        OUTPUT_VARIABLE CMAKE_OSX_DEPLOYMENT_TARGET OUTPUT_STRIP_TRAILING_WHITESPACE)
+endif()
+
 project(wrk3 C CXX ASM)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-include(FetchContent)
-set(FETCHCONTENT_QUIET OFF)
+# ==============================================================================
+# Dependencies (git submodules under deps/)
+# ==============================================================================
 
-# ==============================================================================
-# Dependencies (fetched automatically, like Cargo deps in Rust)
-# ==============================================================================
+# Block system OpenSSL/LibreSSL so nothing accidentally links against them.
+# s2n-tls's try_compile feature probes can pick up system OpenSSL 3.x headers
+# and enable provider APIs (EVP_MD_fetch etc.) that aws-lc doesn't implement,
+# causing link failures.
+set(CMAKE_DISABLE_FIND_PACKAGE_OpenSSL TRUE CACHE BOOL "" FORCE)
 
 # --- AWS-LC (libcrypto - replaces OpenSSL) ---
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(SEARCH_LIBCRYPTO OFF CACHE BOOL "" FORCE)
+set(BUILD_TOOL OFF CACHE BOOL "" FORCE)
+set(BUILD_LIBSSL OFF CACHE BOOL "" FORCE)
 
-FetchContent_Declare(aws_lc
-    GIT_REPOSITORY https://github.com/aws/aws-lc.git
-    GIT_TAG        main
-    GIT_SHALLOW    TRUE
-    GIT_PROGRESS   TRUE
-)
-message(STATUS "Fetching AWS-LC...")
-FetchContent_MakeAvailable(aws_lc)
+set(CMAKE_WARN_DEPRECATED OFF)
+add_subdirectory(deps/aws-lc EXCLUDE_FROM_ALL)
+set(CMAKE_WARN_DEPRECATED ON)
 
-# --- s2n-tls (TLS implementation, uses AWS-LC's crypto target) ---
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(UNSAFE_TREAT_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
-
-FetchContent_Declare(s2n_tls
-    GIT_REPOSITORY https://github.com/aws/s2n-tls.git
-    GIT_TAG        main
-    GIT_SHALLOW    TRUE
-    GIT_PROGRESS   TRUE
-)
-message(STATUS "Fetching s2n-tls...")
-FetchContent_MakeAvailable(s2n_tls)
-
-# --- LuaJIT (scripting engine - uses its own Makefile) ---
-FetchContent_Declare(luajit
-    GIT_REPOSITORY https://github.com/LuaJIT/LuaJIT.git
-    GIT_TAG        v2.1
-    GIT_SHALLOW    TRUE
-)
-# Only populate, don't add_subdirectory (LuaJIT uses Make, not CMake)
-FetchContent_GetProperties(luajit)
-if(NOT luajit_POPULATED)
-    message(STATUS "Fetching LuaJIT...")
-    FetchContent_Populate(luajit)
+# Ensure s2n-tls feature probes compile against aws-lc headers, not system
+# OpenSSL. try_compile doesn't fully resolve INTERFACE_INCLUDE_DIRECTORIES
+# from non-imported targets, so we inject aws-lc's include dirs globally.
+get_target_property(_aws_lc_inc crypto INTERFACE_INCLUDE_DIRECTORIES)
+if(_aws_lc_inc)
+    include_directories(BEFORE SYSTEM ${_aws_lc_inc})
 endif()
 
-# Build LuaJIT via Make
-set(LUAJIT_DIR ${luajit_SOURCE_DIR}/src)
+# --- s2n-tls (TLS implementation, uses AWS-LC's crypto target) ---
+set(UNSAFE_TREAT_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(deps/s2n-tls EXCLUDE_FROM_ALL)
+
+# --- LuaJIT (scripting engine - uses its own Makefile, not CMake) ---
+set(LUAJIT_DIR ${CMAKE_SOURCE_DIR}/deps/luajit/src)
 if(APPLE)
-    execute_process(COMMAND sw_vers -productVersion OUTPUT_VARIABLE MACOS_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
-    set(LUAJIT_EXTRA_ENV "MACOSX_DEPLOYMENT_TARGET=${MACOS_VERSION}")
+    set(LUAJIT_EXTRA_ENV "MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
 endif()
 
 add_custom_command(
@@ -115,7 +107,6 @@ target_link_libraries(wrk PRIVATE
     crypto
     luajit_lib
     pthread
-    m
 )
 
 target_compile_options(wrk PRIVATE -Wall -O2 -D_REENTRANT)
